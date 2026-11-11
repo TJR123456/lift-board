@@ -1,0 +1,9 @@
+# Personal data stays on this Mac
+data/
+index.html
+sheet_id.txt
+screenshots/
+linkedin-post.md
+*.xlsx
+.DS_Store
+__pycache__/

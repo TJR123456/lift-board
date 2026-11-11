@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lift Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap">
+<style>
+/* House style from Trent's .Rmd reports (matchup_archetypes / smoltz_audit):
+   EB Garamond, cyan + charcoal, square corners, charcoal table heads, striped rows,
+   cyan-ruled title, charcoal section banners. Layout: title → warning → move-up cards → day tables → lift detail. */
+:root {
+  --cyan: #3AB7D6; --cyan-light: #8FD3E6; --charcoal: #212326;
+  --ink: #333333; --muted: #666666; --mid: #A3A8AE; --line: #E0E0E0;
+  --stripe: #F5F5F1; --tint: #DDF2F8; --red: #B23A3A; --olive: #A59A6A; --hold: #D9D9D2;
+  --bg: #FFFFFF; --panel: #FFFFFF; --head-bg: #212326; --head-ink: #FFFFFF; --banner-bg: #212326;
+  --accent: var(--cyan); --accent-soft: var(--tint); --warn: var(--olive); --bad: var(--red);
+  --font: "EB Garamond", Garamond, "Times New Roman", serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --ink: #E6E6E1; --muted: #A3A8AE; --line: #3A3D42; --stripe: #1B1D20; --tint: #16333B;
+    --bg: #141517; --panel: #1B1D20; --head-bg: #0D0E0F; --banner-bg: #0D0E0F; --hold: #4A4C50;
+    --red: #E06C6C; --olive: #C9BC86; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.45 var(--font); }
+.num, td, .jump, .reps-bar span { font-variant-numeric: lining-nums tabular-nums; }
+.wrap { max-width: 1100px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 26px; }
+h1, h2, h3 { font-family: var(--font); margin: 0; text-wrap: balance; color: var(--ink); }
+.muted { color: var(--muted); }
+
+/* Title: cyan rule, then a big bold charcoal title, as in the reports */
+header { display: grid; gap: 10px; }
+header::before { content: ""; height: 2px; background: var(--cyan); }
+header .row { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 14px; }
+h1 { font-size: 2.6rem; line-height: 1.05; font-weight: 700; }
+header p { margin: 4px 0 0; font-size: 1.05rem; }
+.tally { display: flex; flex-wrap: wrap; gap: 6px; }
+.tally span { font-weight: 600; padding: 3px 10px; font-size: .95rem; }
+.refresh { display: flex; flex-direction: column; align-items: end; gap: 6px; }
+.refresh button { background: var(--cyan); color: #FFFFFF; border: 0; padding: 6px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+.refresh button:disabled { background: var(--mid); cursor: progress; }
+.refresh small { color: var(--muted); font-size: .88rem; max-width: 34ch; text-align: right; }
+.refresh small.err { color: var(--red); }
+
+/* Section banner: charcoal box, small cyan label, white title */
+.banner { background: var(--banner-bg); padding: 9px 14px; display: grid; gap: 1px; }
+.banner small { color: var(--cyan); font-weight: 700; font-size: .85rem; }
+.banner h2 { color: #FFFFFF; font-size: 1.45rem; font-weight: 700; }
+
+/* Status chips: cyan family for good news, neutrals for waiting, red only for trouble */
+.pill { display: inline-block; font-size: .82rem; font-weight: 600; padding: 1px 8px; white-space: nowrap; }
+.s-move { background: var(--cyan); color: #FFFFFF; }
+.s-close { background: var(--cyan-light); color: var(--charcoal); }
+.s-build { background: var(--stripe); color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+.s-holding { background: var(--hold); color: var(--ink); }
+.s-drop { background: var(--red); color: #FFFFFF; }
+.s-new { background: var(--tint); color: var(--ink); }
+
+/* Move-up cards: the reports' key box (stripe fill, cyan left rule) */
+.ready { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px; }
+.card { background: var(--stripe); border: 0; border-left: 3px solid var(--cyan); padding: 12px 14px; display: grid; gap: 4px;
+  cursor: pointer; text-align: left; color: inherit; font: inherit; }
+.card:hover, .card:focus-visible { background: var(--tint); outline: none; }
+.card .day { font-size: .85rem; color: var(--muted); }
+.card .lift { font-weight: 700; font-size: 1.1rem; }
+.card .jump { font-size: 2rem; font-weight: 700; line-height: 1.05; }
+.card .jump b { color: var(--cyan); }
+.empty { background: var(--stripe); border-left: 3px solid var(--mid); padding: 12px 14px; }
+
+/* Fatigue warning: note box with a red rule */
+.fatigue { background: var(--stripe); border-left: 3px solid var(--red); padding: 12px 14px; display: grid; gap: 6px; }
+.fatigue strong { color: var(--red); font-size: 1.2rem; }
+.fatigue ul { margin: 0; padding-left: 18px; }
+
+/* Tables: booktabs feel, charcoal head row, striped body */
+.day-block { display: grid; gap: 0; }
+.table-scroll { overflow-x: auto; border-bottom: 1px solid var(--line); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; }
+th { background: var(--head-bg); color: var(--head-ink); font-weight: 700; font-size: .92rem; text-align: left; padding: 7px 12px; }
+td { padding: 8px 12px; vertical-align: middle; }
+tbody tr:nth-child(even) td { background: var(--stripe); }
+tbody tr { cursor: pointer; }
+tbody tr:hover td, tbody tr.open td { background: var(--tint); }
+td.lift-name { font-weight: 600; min-width: 150px; }
+td.lift-name small { display: block; font-weight: 400; color: var(--muted); font-size: .85rem; }
+td.num, .reps-bar span { white-space: nowrap; }
+.reps-bar { display: grid; gap: 3px; min-width: 130px; }
+.reps-bar .track { height: 5px; background: var(--line); overflow: hidden; }
+.reps-bar .fill { height: 100%; background: var(--mid); }
+.reps-bar.s-move .fill { background: var(--cyan); } .reps-bar.s-close .fill { background: var(--cyan-light); }
+.reps-bar.s-holding .fill { background: var(--mid); } .reps-bar.s-drop .fill { background: var(--red); }
+.reps-bar.s-move, .reps-bar.s-close, .reps-bar.s-holding, .reps-bar.s-drop, .reps-bar.s-build { background: none; box-shadow: none; color: inherit; }
+.up { color: var(--cyan); font-weight: 600; } .down { color: var(--red); font-weight: 600; }
+svg.spark { display: block; }
+@media (max-width: 900px) { .hide-mid { display: none; } }
+
+/* Lift detail */
+.detail { background: var(--panel); border-top: 2px solid var(--cyan); border-bottom: 1px solid var(--line); padding: 14px 0; display: grid; gap: 12px; }
+.detail-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: baseline; }
+.detail-head h3 { font-size: 1.8rem; font-weight: 700; }
+.advice { font-size: 1.1rem; margin: 0; max-width: 68ch; border-left: 2px solid var(--cyan); padding: 2px 10px; }
+.chart-box { position: relative; }
+.chart-box svg { width: 100%; height: auto; display: block; font-family: var(--font); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .9rem; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); padding: 4px 9px; font-size: .9rem; box-shadow: 0 4px 14px rgb(0 0 0 / .12); white-space: nowrap; }
+.sets { display: grid; font-size: .98rem; }
+.sets div { display: grid; grid-template-columns: 70px 1fr; gap: 10px; padding: 4px 8px; }
+.sets div:nth-child(even) { background: var(--stripe); }
+.tag { font-size: .8rem; font-weight: 700; color: var(--cyan); margin-left: 6px; }
+.tag.skew { color: var(--olive); }
+details { border-top: 1px solid var(--line); padding: 10px 0; }
+summary { cursor: pointer; font-weight: 700; font-size: 1.1rem; }
+details ul { margin: 10px 0 0; padding-left: 18px; }
+details li { margin: 4px 0; }
+button.close-detail { background: none; border: 1px solid var(--line); color: var(--ink); padding: 3px 10px; font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+/* Body map: cyan = primary, light cyan = secondary, grey = not trained */
+.muscles { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 18px 26px; align-items: start; padding: 14px 0 16px; }
+.muscles.compact { grid-template-columns: minmax(0, 240px) minmax(0, 1fr); padding: 0; }
+@media (max-width: 640px) { .muscles, .muscles.compact { grid-template-columns: 1fr; } .muscles .bodymap { max-width: 300px; } }
+.bodymap svg { width: 100%; height: auto; display: block; font-family: var(--font); }
+.bodymap .base { fill: var(--stripe); stroke: var(--mid); stroke-width: 1; }
+.bodymap .m { stroke: var(--bg); stroke-width: 1.2; fill: var(--hold); }
+.bodymap .m.p { fill: var(--cyan); } .bodymap .m.s { fill: var(--cyan-light); }
+.bodymap text { fill: var(--muted); font-size: 13px; text-anchor: middle; }
+.mkey { display: flex; flex-wrap: wrap; gap: 14px; font-size: .9rem; color: var(--muted); }
+.mkey i { display: inline-block; width: 11px; height: 11px; margin-right: 5px; vertical-align: -1px; }
+.mload { display: grid; gap: 5px; font-size: .95rem; }
+.mload .row { display: grid; grid-template-columns: 150px 1fr 92px; gap: 10px; align-items: center; }
+.mload .bar { height: 9px; background: var(--line); display: flex; }
+.mload .bar b { background: var(--cyan); } .mload .bar span { background: var(--cyan-light); }
+.mload .n { text-align: right; color: var(--muted); white-space: nowrap; }
+.mload .lifts { font-size: .85rem; color: var(--muted); grid-column: 1 / -1; margin-top: -4px; }
+.mlist { margin: 0; display: grid; gap: 4px; }
+.mlist b { font-weight: 700; }
+@media (max-width: 560px) { .mload .row { grid-template-columns: 110px 1fr 80px; } }
+/* Tabs and weekly volume */
+.tabs { display: flex; gap: 0; border-bottom: 2px solid var(--charcoal); }
+.tabs button { background: none; border: 0; padding: 8px 18px; font: inherit; font-size: 1.1rem; font-weight: 700; color: var(--muted); cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--banner-bg); color: #FFFFFF; }
+.tabs button:hover:not([aria-selected="true"]) { color: var(--ink); background: var(--stripe); }
+.view { display: grid; gap: 26px; }
+table.vol { min-width: 0; width: auto; }
+table.vol th, table.vol td { text-align: center; padding: 6px 10px; white-space: nowrap; }
+table.vol th:first-child, table.vol td:first-child { text-align: left; position: sticky; left: 0; z-index: 1; }
+table.vol td:first-child { background: var(--bg); font-weight: 600; }
+table.vol tbody tr:nth-child(even) td:first-child { background: var(--stripe); }
+table.vol tbody tr { cursor: default; }
+table.vol tbody tr:hover td { background: inherit; }
+table.vol th small { display: block; font-weight: 400; font-size: .78rem; color: var(--cyan); }
+table.vol td small { display: block; font-size: .78rem; color: var(--muted); }
+table.vol td.b1 { background: var(--tint) !important; } table.vol td.b2 { background: var(--cyan-light) !important; color: var(--charcoal); }
+table.vol td.b3 { background: var(--cyan) !important; color: #FFFFFF; } table.vol td.b3 small, table.vol td.b2 small { color: inherit; opacity: .8; }
+table.vol tr.group td { background: var(--bg) !important; color: var(--muted); font-size: .85rem; font-weight: 700; padding-top: 12px; }
+table.vol tr.total td { border-top: 2px solid var(--charcoal); font-weight: 700; }
+.seg { display: flex; flex-wrap: wrap; align-items: center; gap: 0; margin-bottom: -10px; }
+.seg span { margin-right: 12px; }
+.seg button { background: var(--stripe); color: var(--ink); border: 1px solid var(--line); padding: 5px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+.seg button + button { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--charcoal); color: #FFFFFF; border-color: var(--charcoal); }
+.sum-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 0; }
+.sum-controls select { font: inherit; padding: 4px 8px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); margin-left: 6px; }
+.sum-controls button { background: var(--cyan); color: #FFFFFF; border: 0; padding: 6px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+#sum-canvas { width: 100%; max-width: 540px; height: auto; display: block; box-shadow: 0 6px 24px rgb(0 0 0 / .18); }
+.dpct { display: block; font-size: .78rem; font-weight: 700; }
+.dpct.up { color: var(--cyan); } .dpct.down { color: var(--red); }
+.vkey { display: flex; flex-wrap: wrap; gap: 14px; font-size: .9rem; color: var(--muted); }
+.vkey i { display: inline-block; width: 14px; height: 11px; margin-right: 5px; vertical-align: -1px; box-shadow: inset 0 0 0 1px var(--line); }
+@media (max-width: 560px) { h1 { font-size: 2.1rem; } .hide-narrow { display: none; } table { min-width: 0; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="row">
+      <div>
+        <h1>Lift Board</h1>
+        <p class="muted" id="meta"></p>
+      </div>
+      <div class="refresh">
+        <button id="refresh-btn" type="button">Refresh from sheet</button>
+        <small id="refresh-msg"></small>
+        <div class="tally" id="tally"></div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-view="board" aria-selected="true">Board</button>
+    <button role="tab" data-view="volume" aria-selected="false">Weekly volume</button>
+    <button role="tab" data-view="summary" aria-selected="false">Daily summary</button>
+  </nav>
+
+  <div class="view" id="view-board">
+  <div class="fatigue" id="fatigue" hidden></div>
+
+  <section>
+    <div class="banner" style="margin-bottom:12px"><small id="ready-label">Next session</small><h2>Move up</h2></div>
+    <div class="ready" id="ready"></div>
+  </section>
+
+  <div id="detail-slot"></div>
+
+  <section id="routine" style="display:grid;gap:22px"></section>
+
+  <section class="day-block">
+    <div class="banner"><small>Five days, every muscle</small><h2>Whole week by muscle</h2></div>
+    <div id="week-muscles"></div>
+  </section>
+
+  <details id="retired">
+    <summary>Lifts no longer in the routine</summary>
+    <div class="table-scroll" style="margin-top:12px"><table><thead><tr>
+      <th>Lift</th><th>Last top set</th><th class="hide-narrow">Est. max trend</th><th>Last done</th>
+    </tr></thead><tbody id="retired-body"></tbody></table></div>
+  </details>
+
+  <details>
+    <summary>How the board makes its calls</summary>
+    <ul id="rules"></ul>
+  </details>
+  </div>
+
+  <div class="view" id="view-volume" hidden>
+    <div class="seg" role="group" aria-label="Measure volume by">
+      <span class="muted">Measure volume by</span>
+      <button type="button" data-mode="sets" aria-pressed="true">Sets</button>
+      <button type="button" data-mode="lbs" aria-pressed="false">Total weight</button>
+    </div>
+    <section class="day-block">
+      <div class="banner"><small id="vol-total-label"></small><h2 id="vol-chart-title">Total sets per week</h2></div>
+      <div class="chart-box" id="vol-chart" style="padding-top:12px"></div>
+    </section>
+    <section class="day-block">
+      <div class="banner"><small id="vol-muscle-sub"></small><h2>By muscle</h2></div>
+      <div class="vkey" style="padding:10px 0" id="vol-key"></div>
+      <div class="table-scroll" id="vol-muscles"></div>
+    </section>
+    <section class="day-block">
+      <div class="banner"><small id="vol-workout-sub"></small><h2>By lift, one day at a time</h2></div>
+      <div class="seg days" role="group" aria-label="Day" id="vol-days" style="margin:12px 0 10px"></div>
+      <div class="table-scroll" id="vol-workouts"></div>
+    </section>
+    <section class="day-block">
+      <div class="banner"><small id="death-sub">From your "Attempt at death set tracker" tab</small><h2>Death sets</h2></div>
+      <div class="table-scroll" id="vol-death" style="margin-top:12px"></div>
+    </section>
+    <section class="day-block">
+      <div class="banner"><small id="time-sub"></small><h2>Time in the gym</h2></div>
+      <div class="table-scroll" id="vol-time" style="margin-top:12px"></div>
+    </section>
+    <p class="muted" style="margin:0">Weeks run Monday to Sunday, newest on the left. Every logged set counts, including different-machine sets, since the work was still done. The day pages only start with the new split; your bro-split history still counts in the chart and muscle table. Death-set drops count as the sets you wrote in the formula. Muscles come from the same map as the body figures on the Board tab.</p>
+  </div>
+
+  <div class="view" id="view-summary" hidden>
+    <section class="day-block">
+      <div class="banner"><small>One workout on one card: volume, change from last week, muscles hit, death sets</small><h2>Daily summary</h2></div>
+      <div class="sum-controls">
+        <label>Workout <select id="sum-pick"></select></label>
+        <button type="button" id="sum-save">Save PNG</button>
+        <span class="muted" id="sum-msg"></span>
+      </div>
+      <canvas id="sum-canvas" width="1080" height="1350"></canvas>
+    </section>
+  </div>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const $ = (s) => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  }
+  kids.flat(Infinity).forEach((k) => k != null && n.append(k));
+  return n;
+};
+// Days are named by workout ("Push - Tricep Focus"), not by weekday.
+const dayName = (t) => (t || '').replace(/^(Mon|Tues?|Wed|Thurs?|Fri|Sat|Sun)\s+/, '').replace('BicepForearm', 'Bicep & Forearm');
+const fmtW = (w) => String(+w.toFixed(2));
+const fmtDate = (iso) => new Date(iso + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const LABEL = { move: 'Move up', close: 'Close', build: 'Build reps', holding: 'Holding', drop: 'Too heavy', new: 'New' };
+const usable = (l) => l.sessions.filter((s) => !s.skewed && (!l.form_reset || s.date >= l.form_reset));
+
+function advice(l) {
+  if (l.status === 'new') return 'No sessions yet. Log one and the board makes its first call.';
+  const at = `${fmtW(l.weight)} lbs`;
+  const avg = `${l.avg} reps a set`;
+  switch (l.status) {
+    case 'move': return l.predicted >= l.floor
+      ? `${avg} at ${at}. At ${fmtW(l.next_weight)} that projects to about ${l.predicted}, still over the ${l.floor}-rep floor. Load it next time.`
+      : `${avg} at ${at} is past the ${DATA.rules.cap}-rep cap. Go to ${fmtW(l.next_weight)} and expect the reps to drop; on a light weight, one plate is a big jump.`;
+    case 'close': return `${avg} at ${at}. Jump now and you land around ${l.predicted}, just under ${l.floor}. One more session here. Get to ${l.target} and it's time.`;
+    case 'build': return l.capped
+      ? `${avg} at ${at}. ${fmtW(l.next_weight)} is a big jump this light, so stay and stack reps until you average ${l.target}.`
+      : `${avg} at ${at}. You need about ${l.target} before ${fmtW(l.next_weight)} keeps you at ${l.floor}+. Stay and add reps.`;
+    case 'holding': return `Best was ${fmtW(l.best_weight)}×${l.best_reps} on ${fmtDate(l.best_date)}, ${l.since_best} sessions ago. On a hard cut, holding is winning. Keep chasing reps at ${at}; ${l.target} a set moves you up.`;
+    case 'drop': return `${at} has you under ${DATA.rules.too_heavy} reps a set for two sessions. Too heavy for now. Back to ${fmtW(l.prev_weight)} and earn it again at ${l.target}.`;
+    default: return 'Not enough sessions to make a call yet.';
+  }
+}
+
+function spark(l, w = 110, h = 30) {
+  const pts = usable(l).map((s) => s.e1rm);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'spark'); svg.setAttribute('width', w); svg.setAttribute('height', h);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  if (pts.length < 2) return svg;
+  const lo = Math.min(...pts), hi = Math.max(...pts), span = hi - lo || 1;
+  const xy = pts.map((v, i) => [3 + (i * (w - 6)) / (pts.length - 1), h - 4 - ((v - lo) / span) * (h - 8)]);
+  const path = document.createElementNS(svg.namespaceURI, 'polyline');
+  path.setAttribute('points', xy.map((p) => p.join(',')).join(' '));
+  path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'var(--accent)');
+  path.setAttribute('stroke-width', '1.8'); path.setAttribute('stroke-linejoin', 'round'); path.setAttribute('stroke-linecap', 'round');
+  const dot = document.createElementNS(svg.namespaceURI, 'circle');
+  dot.setAttribute('cx', xy.at(-1)[0]); dot.setAttribute('cy', xy.at(-1)[1]); dot.setAttribute('r', 2.6);
+  dot.setAttribute('fill', 'var(--accent)');
+  svg.append(path, dot);
+  return svg;
+}
+
+function change(l) {
+  const u = usable(l);
+  if (u.length < 2) return el('span', { class: 'muted', text: '—' });
+  const pct = Math.round((u.at(-1).e1rm / u[0].e1rm - 1) * 100);
+  return el('span', { class: 'num ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : 'muted'), text: (pct > 0 ? '+' : '') + pct + '%' });
+}
+
+function repsBar(l) {
+  if (l.status === 'new') return el('span', { class: 'muted', text: '—' });
+  const pct = Math.min(100, (l.avg / l.target) * 100);
+  return el('div', { class: 'reps-bar s-' + l.status },
+    el('span', { class: 'num', text: `${l.avg.toFixed(1)} / ${l.target} avg` }),
+    el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${pct}%` })));
+}
+
+// ---- Body map ---------------------------------------------------------------
+// Each muscle is drawn for the figure's left half (viewer's left) and mirrored.
+const MUSCLE_NAME = {
+  traps: 'Traps', upper_back: 'Mid back (rhomboids, mid traps)', lats: 'Lats', lower_back: 'Lower back',
+  front_delts: 'Front delts', side_delts: 'Side delts', rear_delts: 'Rear delts',
+  upper_chest: 'Upper chest', chest: 'Chest', biceps: 'Biceps', brachialis: 'Brachialis',
+  triceps: 'Triceps', forearm_flex: 'Forearm flexors', forearm_ext: 'Brachioradialis & extensors',
+  abs: 'Abs', obliques: 'Obliques', quads: 'Quads', adductors: 'Adductors', glutes: 'Glutes',
+  hamstrings: 'Hamstrings', calves: 'Calves',
+};
+const BASE = [
+  'M100,56 L91,58 Q84,68 70,71 L72,92 Q70,110 75,124 Q72,170 75,200 Q68,220 66,240 L100,254 Z',            // torso
+  'M70,70 Q50,70 46,90 Q43,120 48,150 Q40,175 38,198 L56,202 Q62,180 64,162 Q68,140 68,120 Q72,100 72,88 Z', // arm
+  'M66,236 Q60,290 68,340 Q61,380 67,414 L86,416 Q90,380 88,346 Q98,320 98,252 Z',                        // leg
+];
+const FRONT = [
+  ['traps', 'M93,55 Q87,66 70,71 L84,75 Q94,69 97,61 Z'],
+  ['side_delts', 'M69,71 Q51,71 46,90 Q45,102 49,111 L54,112 Q52,98 55,88 Q60,77 69,71 Z'],
+  ['front_delts', 'M69,71 Q58,76 55,88 Q52,98 54,112 Q63,104 71,92 Q75,80 69,71 Z'],
+  ['upper_chest', 'M98,76 L77,78 Q72,84 72,93 L98,96 Z'],
+  ['chest', 'M98,96 L72,93 Q70,109 76,121 Q88,129 98,125 Z'],
+  ['biceps', 'M56,113 Q50,125 51,141 Q53,151 58,154 Q66,140 66,125 Q64,114 60,108 Z'],
+  ['brachialis', 'M50,128 Q46,142 49,157 L56,158 Q51,150 51,138 Z'],
+  ['forearm_ext', 'M48,161 Q42,176 40,195 L46,198 Q50,181 56,163 Z'],
+  ['forearm_flex', 'M57,162 Q51,181 47,198 L55,200 Q61,183 63,165 Z'],
+  ['obliques', 'M84,127 Q75,126 75,141 Q73,170 77,199 L86,206 Q84,170 86,130 Z'],
+  ['abs', 'M98,128 L88,130 Q86,170 88,206 Q93,213 98,215 Z'],
+  ['quads', 'M86,241 Q73,238 67,252 Q63,290 70,330 Q80,342 90,336 Q96,320 96,298 Q88,290 86,262 Z'],
+  ['adductors', 'M98,252 L89,246 Q85,264 87,290 Q92,300 97,296 Z'],
+  ['calves', 'M70,352 Q65,380 70,408 L76,408 Q76,380 80,352 Z'],
+];
+const BACK = [
+  ['traps', 'M100,52 L92,55 Q86,66 70,71 L80,80 Q92,83 100,98 Z'],
+  ['upper_back', 'M100,98 Q92,83 80,80 L77,96 Q85,120 100,140 Z'],
+  ['side_delts', 'M69,71 Q51,71 46,90 Q45,102 49,111 L54,110 Q53,96 57,86 Q61,77 69,71 Z'],
+  ['rear_delts', 'M69,71 Q60,77 57,86 Q53,96 54,110 Q64,100 72,90 Q78,80 69,71 Z'],
+  ['lats', 'M77,96 Q72,124 75,160 Q80,186 89,198 Q88,166 94,146 Q85,124 77,96 Z'],
+  ['lower_back', 'M100,142 Q94,148 94,150 Q88,168 90,198 Q94,210 100,212 Z'],
+  ['triceps', 'M55,108 Q47,122 48,148 L61,153 Q67,132 66,113 Z'],
+  ['forearm_ext', 'M48,161 Q42,178 40,197 L55,200 Q61,182 63,165 Z'],
+  ['glutes', 'M100,214 Q82,211 71,225 Q66,248 76,263 Q90,269 100,259 Z'],
+  ['hamstrings', 'M98,268 Q82,270 71,268 Q66,300 72,336 L92,336 Q98,300 98,268 Z'],
+  ['calves', 'M70,350 Q61,372 68,400 L86,400 Q92,372 87,350 Z'],
+];
+const SVGNS = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs = {}, ...kids) => {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  kids.flat(Infinity).forEach((k) => k != null && n.append(k));
+  return n;
+};
+function figure(x, label, parts, hit) {
+  const half = (mirror) => svgEl('g', mirror ? { transform: 'translate(200,0) scale(-1,1)' } : {},
+    BASE.map((d) => svgEl('path', { class: 'base', d })),
+    parts.map(([m, d]) => svgEl('path', { class: 'm ' + (hit[m] || ''), d },
+      svgEl('title', {}, `${MUSCLE_NAME[m]}${hit[m] === 'p' ? ' (primary)' : hit[m] === 's' ? ' (secondary)' : ''}`))));
+  return svgEl('g', { transform: `translate(${x},0)` },
+    svgEl('ellipse', { class: 'base', cx: 100, cy: 30, rx: 16, ry: 20 }),
+    svgEl('rect', { class: 'base', x: 92, y: 46, width: 16, height: 14 }),
+    half(false), half(true),
+    svgEl('text', { x: 100, y: 438 }, label));
+}
+function bodyMap(hit) {
+  return el('div', { class: 'bodymap' },
+    svgEl('svg', { viewBox: '0 0 410 446', role: 'img',
+        'aria-label': 'Muscles trained: ' + Object.entries(hit).map(([m, t]) => `${MUSCLE_NAME[m]} (${t === 'p' ? 'primary' : 'secondary'})`).join(', ') },
+      figure(0, 'Front', FRONT, hit), figure(210, 'Back', BACK, hit)));
+}
+const muscleKey = () => el('div', { class: 'mkey' },
+  el('span', {}, el('i', { style: 'background:var(--cyan)' }), 'Primary'),
+  el('span', {}, el('i', { style: 'background:var(--cyan-light)' }), 'Secondary'),
+  el('span', {}, el('i', { style: 'background:var(--hold)' }), 'Not trained'));
+const setCount = (l) => +((l.scheme || '').match(/(\d+)\s*x/i) || [0, 3])[1];
+
+function liftMuscles(l) {
+  const hit = {};
+  l.secondary.forEach((m) => { hit[m] = 's'; });
+  l.primary.forEach((m) => { hit[m] = 'p'; });
+  const names = (ms) => ms.map((m) => MUSCLE_NAME[m]).join(', ') || 'none';
+  return el('div', { class: 'muscles compact' }, bodyMap(hit),
+    el('div', { class: 'mlist' },
+      el('div', {}, el('b', { text: 'Primary: ' }), names(l.primary)),
+      el('div', {}, el('b', { text: 'Secondary: ' }), names(l.secondary)),
+      muscleKey()));
+}
+
+// Day or week load: direct sets (lift's primary) and assisting sets (secondary).
+function muscleLoad(lifts, note) {
+  const load = {};
+  for (const l of lifts) {
+    const n = setCount(l);
+    for (const [list, kind] of [[l.primary, 'direct'], [l.secondary, 'assist']])
+      for (const m of list) {
+        const x = load[m] ||= { direct: 0, assist: 0, lifts: [] };
+        x[kind] += n;
+        if (kind === 'direct' && !x.lifts.includes(l.name)) x.lifts.push(l.name);
+      }
+  }
+  const hit = {};
+  for (const [m, x] of Object.entries(load)) hit[m] = x.direct ? 'p' : 's';
+  const rows = Object.entries(load).map(([m, x]) => ({ m, ...x, score: x.direct + x.assist / 2 }))
+    .sort((a, b) => b.score - a.score || b.direct - a.direct);
+  const top = Math.max(...rows.map((r) => r.direct + r.assist), 1);
+  return el('div', { class: 'muscles' }, bodyMap(hit),
+    el('div', { class: 'mload' },
+      muscleKey(),
+      el('div', { class: 'muted', style: 'font-size:.9rem', text: note }),
+      rows.map((r) => [
+        el('div', { class: 'row' },
+          el('span', { text: MUSCLE_NAME[r.m] }),
+          el('div', { class: 'bar', title: `${r.direct} direct, ${r.assist} assisting` },
+            el('b', { style: `width:${100 * r.direct / top}%` }), el('span', { style: `width:${100 * r.assist / top}%` })),
+          el('span', { class: 'n num', text: r.direct ? `${r.direct} sets${r.assist ? ` +${r.assist}` : ''}` : `+${r.assist}` })),
+        r.lifts.length ? el('div', { class: 'lifts', text: r.lifts.join(', ') }) : null])));
+}
+
+let openKey = null;
+function openDetail(key) {
+  openKey = openKey === key ? null : key;
+  document.querySelectorAll('tbody tr').forEach((tr) => tr.classList.toggle('open', tr.dataset.key === openKey));
+  const slot = $('#detail-slot');
+  slot.replaceChildren();
+  if (!openKey) return;
+  const l = DATA.lifts.find((x) => x.id === openKey);
+  const box = el('div', { class: 'detail', id: 'detail' },
+    el('div', { class: 'detail-head' },
+      el('div', {}, el('h3', { text: l.name }), el('div', { class: 'muted', text: [dayName(l.day), l.scheme].filter(Boolean).join(' · ') })),
+      el('div', { style: 'display:flex;gap:10px;align-items:center' },
+        el('span', { class: 'pill s-' + l.status, text: LABEL[l.status] }),
+        el('button', { class: 'close-detail', onclick: () => openDetail(key), text: 'Close' }))),
+    el('p', { class: 'advice', text: advice(l) }),
+    l.other_day ? el('p', { class: 'muted', style: 'margin:0', text: `Not logged on ${dayName(l.day)} yet, so this call uses your ${fmtDate(l.judged_date)} session (${dayName(l.other_day)}).` }) : null,
+    l.base ? el('p', { class: 'muted', style: 'margin:0', text: `Weights shown are the plates you load. The math adds the machine's ${l.base} lb base, because that's what you actually move.` }) : null,
+    l.form_reset ? el('p', { class: 'muted', style: 'margin:0', text: `Form changed on ${fmtDate(l.form_reset)}. Older numbers came from a different lift, so calls and % change start there.` }) : null,
+    l.primary.length ? liftMuscles(l) : null,
+    chart(l),
+    el('div', { class: 'legend' },
+      el('span', {}, el('i', { style: 'background:var(--accent)' }), 'Est. max (best set)'),
+      el('span', {}, el('i', { style: 'background:var(--muted)' }), 'Heaviest weight used'),
+      el('span', {}, el('i', { style: 'border:2px solid var(--accent);background:none' }), 'Death set day'),
+      el('span', {}, el('i', { style: 'border:2px dashed var(--warn);background:none' }), 'Different machine (left out)')),
+    el('h3', { style: 'font-size:1.1rem', text: 'Recent sessions' }),
+    el('div', { class: 'sets' }, l.sessions.slice(-8).reverse().map((s) => el('div', {},
+      el('span', { class: 'num muted', text: fmtDate(s.date) }),
+      el('span', { class: 'num' }, s.sets.map(([w, r]) => `${fmtW(w)}×${r}`).join('  ·  '),
+        el('span', { class: 'muted', text: `   avg ${s.avg}` }),
+        s.day !== l.day && l.day ? el('span', { class: 'tag', style: 'color:var(--muted)', text: dayName(s.day) }) : null,
+        s.death ? el('span', { class: 'tag', text: 'death' }) : null,
+        s.skewed ? el('span', { class: 'tag skew', text: 'different machine' }) : null)))));
+  slot.append(box);
+  box.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+}
+
+function chart(l) {
+  const wrap = el('div', { class: 'chart-box' });
+  if (!l.sessions.length) { wrap.append(el('p', { class: 'muted', text: 'Nothing logged yet. The chart starts with your first session.' })); return wrap; }
+  const W = 720, H = 240, m = { t: 12, r: 16, b: 26, l: 44 };
+  const ss = l.sessions.map((s) => ({ ...s, t: new Date(s.date + 'T12:00').getTime(), top: Math.max(...s.sets.map((x) => x[0])) }));
+  const vals = ss.flatMap((s) => [s.e1rm, s.top]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.1 || 5; lo = Math.max(0, lo - pad); hi += pad;
+  const t0 = ss[0].t, t1 = ss.at(-1).t === t0 ? t0 + 864e5 : ss.at(-1).t;
+  const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
+  const y = (v) => H - m.b - ((v - lo) / (hi - lo)) * (H - m.t - m.b);
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', `${l.name}: estimated max and heaviest weight by session`);
+  const add = (tag, a) => { const n = document.createElementNS(NS, tag); for (const k in a) n.setAttribute(k, a[k]); svg.append(n); return n; };
+  const step = niceStep((hi - lo) / 4);
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+    add('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: 'var(--line)', 'stroke-width': 1 });
+    add('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--muted)' }).textContent = Math.round(v);
+  }
+  const months = new Set();
+  ss.forEach((s) => { const d = new Date(s.t); const k = d.getMonth(); if (!months.has(k)) { months.add(k);
+    add('text', { x: x(s.t), y: H - 6, 'font-size': 11, fill: 'var(--muted)', 'text-anchor': x(s.t) > W - 60 ? 'end' : 'start' }).textContent = d.toLocaleDateString('en-US', { month: 'short' }); } });
+  if (l.form_reset) {
+    const tr = new Date(l.form_reset + 'T12:00').getTime();
+    if (tr >= t0 && tr <= t1) { add('line', { x1: x(tr), x2: x(tr), y1: m.t, y2: H - m.b, stroke: 'var(--warn)', 'stroke-dasharray': '4 3' });
+      add('text', { x: x(tr) + 4, y: m.t + 10, 'font-size': 11, fill: 'var(--warn)' }).textContent = 'form change'; }
+  }
+  const good = ss.filter((s) => !s.skewed);
+  add('polyline', { points: good.map((s) => `${x(s.t)},${y(s.top)}`).join(' '), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.5, 'stroke-dasharray': '2 3' });
+  add('polyline', { points: good.map((s) => `${x(s.t)},${y(s.e1rm)}`).join(' '), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+  const tip = el('div', { class: 'tip', hidden: '' });
+  ss.forEach((s) => {
+    add('circle', { cx: x(s.t), cy: y(s.top), r: 2.5, fill: 'var(--muted)', opacity: s.skewed ? 0.3 : 1 });
+    const c = add('circle', { cx: x(s.t), cy: y(s.e1rm), r: s.death ? 5 : 3.5,
+      fill: s.skewed ? 'none' : s.death ? 'var(--panel)' : 'var(--accent)',
+      stroke: s.skewed ? 'var(--warn)' : 'var(--accent)', 'stroke-width': 2, 'stroke-dasharray': s.skewed ? '2 2' : '' });
+    const hit = add('circle', { cx: x(s.t), cy: y(s.e1rm), r: 12, fill: 'transparent' });
+    hit.addEventListener('pointerenter', () => {
+      tip.hidden = false;
+      tip.textContent = `${fmtDate(s.date)} · est. max ${Math.round(s.e1rm)} · top ${fmtW(s.top)}${s.skewed ? ' · different machine' : ''}`;
+      const r = wrap.getBoundingClientRect(), b = c.getBoundingClientRect();
+      const left = Math.min(Math.max(0, b.left - r.left - 60), r.width - tip.offsetWidth);
+      tip.style.left = left + 'px'; tip.style.top = Math.max(0, b.top - r.top - 38) + 'px';
+    });
+    hit.addEventListener('pointerleave', () => { tip.hidden = true; });
+  });
+  wrap.append(svg, tip);
+  return wrap;
+}
+function niceStep(raw) { const p = 10 ** Math.floor(Math.log10(raw || 1)); return [1, 2, 2.5, 5, 10].map((k) => k * p).find((s) => s >= raw); }
+
+function render() {
+  const cur = DATA.lifts.filter((l) => l.current);
+  $('#meta').textContent = `Updated ${DATA.built} · ${DATA.logged} workouts logged, ${fmtDate(DATA.first)} to ${fmtDate(DATA.last)}`;
+  const count = (s) => cur.filter((l) => l.status === s).length;
+  $('#tally').replaceChildren(...['move', 'close', 'holding', 'drop'].filter((s) => count(s))
+    .map((s) => el('span', { class: 's-' + s, text: `${count(s)} ${LABEL[s]}` })));
+
+  const f = DATA.fatigue;
+  const box = $('#fatigue');
+  box.hidden = !f;
+  if (f) box.replaceChildren(
+    el('strong', { text: `Fatigue warning: ${f.drops.length} lifts dropped the week of ${fmtDate(f.week)}` }),
+    el('span', { text: 'One lift dipping is a bad day. Four or more in the same week is fatigue, and on a cut it stacks fast. Take an easier week: same lifts, about 2 fewer sets each, stop 1 to 2 reps short of failure, no death sets.' }),
+    el('ul', {}, f.drops.map((d) => el('li', { class: 'num', text: `${d.name} (${dayName(d.day)}): est. max ${d.from} → ${d.to}, down ${d.pct}%` }))));
+
+  const ready = cur.filter((l) => l.status === 'move');
+  $('#ready').replaceChildren(...(ready.length ? ready.map((l) => el('button', { class: 'card', onclick: () => openDetail(l.id) },
+    el('span', { class: 'day', text: dayName(l.day) }),
+    el('span', { class: 'lift', text: l.name }),
+    el('span', { class: 'jump num' }, `${fmtW(l.weight)} → `, el('b', { text: fmtW(l.next_weight) })),
+    el('span', { class: 'muted num', text: `${l.avg} a set on ${fmtDate(l.judged_date)}, about ${l.predicted} after the jump` })))
+    : [el('div', { class: 'empty muted', text: `Nothing is ready yet. A lift lands here once the next weight still projects to ${DATA.rules.floor}+ reps a set.` })]));
+
+  const days = DATA.days;
+  $('#routine').replaceChildren(...days.map((day) => el('div', { class: 'day-block' },
+    el('div', { class: 'banner' },
+      el('small', { text: (() => { const ls = cur.filter((l) => l.day === day), n = ls.filter((l) => l.status === 'move').length;
+        return `${ls.length} lifts${n ? ` · ${n} ready to move up` : ''}`; })() }),
+      el('h2', { text: dayName(day) })),
+    muscleLoad(cur.filter((l) => l.day === day), 'Sets per muscle. Cyan is sets where it does the work, light cyan is sets where it helps.'),
+    el('div', { class: 'table-scroll' }, el('table', {},
+      el('thead', {}, el('tr', {}, ['Lift', 'Call', 'Top set', 'Avg reps to move up', 'At this weight', 'Est. max trend', 'Change']
+        .map((h, i) => el('th', { class: i === 4 ? 'hide-mid' : i === 5 ? 'hide-narrow' : '', text: h })))),
+      el('tbody', {}, cur.filter((l) => l.day === day).map((l) => el('tr', { 'data-key': l.id, tabindex: 0,
+          onclick: () => openDetail(l.id), onkeydown: (e) => { if (e.key === 'Enter') openDetail(l.id); } },
+        el('td', { class: 'lift-name' }, l.name, el('small', { text: l.scheme })),
+        el('td', {}, el('span', { class: 'pill s-' + l.status, text: LABEL[l.status] })),
+        el('td', { class: 'num', text: l.weight ? `${fmtW(l.weight)} × ${l.reps}` : '—' }),
+        el('td', {}, repsBar(l)),
+        el('td', { class: 'num hide-mid', text: l.sessions_at_weight ? `${l.sessions_at_weight} session${l.sessions_at_weight > 1 ? 's' : ''}` : '—' }),
+        el('td', { class: 'hide-narrow' }, spark(l)),
+        el('td', {}, change(l))))))))));
+
+  $('#week-muscles').replaceChildren(muscleLoad(cur, 'Weekly sets per muscle, all five days added up. 10 to 20 hard sets a week is the usual range for growth; the light part is sets where it helps.'));
+
+  $('#retired-body').replaceChildren(...DATA.lifts.filter((l) => !l.current).map((l) => el('tr', { 'data-key': l.id, onclick: () => openDetail(l.id) },
+    el('td', { class: 'lift-name', text: l.name }),
+    el('td', { class: 'num', text: l.weight ? `${fmtW(l.weight)} × ${l.reps}` : '—' }),
+    el('td', { class: 'hide-narrow' }, spark(l)),
+    el('td', { class: 'num muted', text: fmtDate(l.sessions.at(-1).date) }))));
+
+  const r = DATA.rules;
+  $('#rules').replaceChildren(...[
+    `Weight and reps come straight from your sheet's formulas. Top set = your best set at the heaviest weight you used that day.`,
+    `Average = reps per set at the heaviest weight you used, in your last session of that lift on that day. Ramp-up sets and back-off sets marked like "S4 70%" are left out; death sets count. A lift done on two days gets a separate call for each day.`,
+    `Move up: the board predicts your average at the next weight, which is your average minus (30 + average) × jump ÷ weight. If that is still ${r.floor}+ reps (${Object.entries(r.overrides).map(([k, v]) => `${v}+ for ${k}`).join(', ')}), go up. Bigger jumps need more reps first, up to a cap: averaging ${r.cap} reps at a weight always means move up.`,
+    `Next weight: +5 lbs at 100 lbs and over, +2.5 lbs under 100 (your smallest add-on). Dumbbells: +2.5 under 30 lbs, +5 from 30.`,
+    `Close: the prediction is within ${r.close} rep of the floor.`,
+    `Holding: ${r.hold}+ sessions in a row without a new best est. max, across every day you do the lift. On a cut, that's a good result.`,
+    `Fatigue warning: ${r.fatigue_lifts}+ lifts dropped ${r.fatigue_pct}% or more in est. max in the same week, each compared with the last time you did it on that day. That's when an easier week makes sense.`,
+    `Too heavy: you moved up and averaged under ${r.too_heavy} reps for 2+ sessions at the new weight, on any day (old split included). A weight that's too heavy on Monday is too heavy on Thursday.`,
+    `Est. max = weight × (1 + reps ÷ 30) on your best set. Fair here because every set goes to failure.`,
+    `Machines with a heavy sled (set in BASE_WEIGHT in build.py) are logged as the plates you add; the base is added for jump size, predictions, est. max and pounds moved.`,
+    `Cells shaded blue in your sheet (a different machine) are left out of every call and trend. Cyan cells are marked as death set days.`,
+    `To change any rule, edit the numbers at the top of build.py.`,
+  ].map((t) => el('li', { text: t })));
+}
+// ---- Weekly volume tab --------------------------------------------------------
+const MUSCLE_ORDER = ['chest', 'upper_chest', 'front_delts', 'side_delts', 'rear_delts', 'triceps',
+  'lats', 'upper_back', 'traps', 'lower_back', 'biceps', 'brachialis', 'forearm_ext', 'forearm_flex',
+  'quads', 'hamstrings', 'glutes', 'adductors', 'calves', 'abs', 'obliques'];
+const fmtLbs = (n) => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k lbs` : `${n} lbs`;
+function weekHead(w) {
+  const end = new Date(w + 'T12:00'); end.setDate(end.getDate() + 7);
+  return el('th', {}, fmtDate(w), end > new Date() ? el('small', { text: 'this week' }) : null);
+}
+let volMode = 'sets', volDay = null;
+try { volDay = localStorage.getItem('lift-vol-day'); } catch {}
+try { volMode = localStorage.getItem('lift-vol-mode') === 'lbs' ? 'lbs' : 'sets'; } catch {}
+const fmtK = (n) => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
+
+function renderVolume() {
+  const V = DATA.volume, weeks = V.weeks, lbs = volMode === 'lbs';
+  document.querySelectorAll('.seg:not(.days) button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.mode === volMode));
+  const sum = (w, k) => Object.values(V.workouts[w]).reduce((a, x) => a + x[k], 0);
+  const setTot = weeks.map((w) => sum(w, 'sets')), lbsTot = weeks.map((w) => sum(w, 'lbs'));
+  const totals = lbs ? lbsTot : setTot, fmt = lbs ? fmtK : String;
+
+  // Bar chart, oldest to newest
+  $('#vol-chart-title').textContent = lbs ? 'Total pounds moved per week' : 'Total sets per week';
+  const W = 900, H = 200, pad = { l: 40, r: 8, t: 14, b: 26 };
+  const ws = [...weeks].reverse(), ts = [...totals].reverse(), max = Math.max(...ts, 1);
+  const step = niceStep(max / 4), top = Math.ceil(max / step) * step;
+  const bw = (W - pad.l - pad.r) / ws.length, y = (v) => pad.t + (H - pad.t - pad.b) * (1 - v / top);
+  const grid = []; for (let v = 0; v <= top; v += step) grid.push(v);
+  $('#vol-chart').replaceChildren(svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': $('#vol-chart-title').textContent },
+    grid.map((v) => [svgEl('line', { x1: pad.l, x2: W - pad.r, y1: y(v), y2: y(v), stroke: 'var(--line)' }),
+      svgEl('text', { x: pad.l - 6, y: y(v) + 4, 'text-anchor': 'end', fill: 'var(--muted)', 'font-size': 12 }, fmt(v))]),
+    ws.map((w, i) => {
+      const partial = i === ws.length - 1 && weekHead(w).querySelector('small');
+      return [svgEl('rect', { x: pad.l + i * bw + 3, y: y(ts[i]), width: bw - 6, height: y(0) - y(ts[i]),
+          fill: partial ? 'var(--cyan-light)' : 'var(--cyan)' }, svgEl('title', {}, `Week of ${fmtDate(w)}: ${lbs ? fmtLbs(ts[i]) : ts[i] + ' sets'}`)),
+        svgEl('text', { x: pad.l + i * bw + bw / 2, y: y(ts[i]) - 4, 'text-anchor': 'middle', fill: 'var(--ink)', 'font-size': 12 }, fmt(ts[i])),
+        i % 2 === ws.length % 2 || i === ws.length - 1 ? svgEl('text', { x: pad.l + i * bw + bw / 2, y: H - 8, 'text-anchor': 'middle', fill: 'var(--muted)', 'font-size': 12 }, fmtDate(w)) : null];
+    })));
+  const full = totals.slice(1, 5), avg = full.length ? Math.round(full.reduce((a, b) => a + b, 0) / full.length) : 0;
+  $('#vol-total-label').textContent = full.length ? `Last 4 full weeks average ${lbs ? fmtLbs(avg) : avg + ' sets'}` : '';
+
+  // By muscle. Sets are shaded against the 10-20 growth range; pounds against
+  // that muscle's own best week, since there is no standard for pounds.
+  const used = MUSCLE_ORDER.filter((m) => weeks.some((w) => V.muscles[w]?.[m]));
+  const val = (w, m) => { const x = V.muscles[w]?.[m] || [0, 0, 0, 0]; return lbs ? [x[2], x[3]] : [x[0], x[1]]; };
+  const best = Object.fromEntries(used.map((m) => [m, Math.max(...weeks.map((w) => val(w, m)[0]), 1)]));
+  const band = (n, m) => !n ? '' : lbs ? (n / best[m] < .5 ? 'b1' : n / best[m] < .85 ? 'b2' : 'b3') : n < 10 ? 'b1' : n <= 20 ? 'b2' : 'b3';
+  $('#vol-muscle-sub').textContent = lbs
+    ? 'Pounds moved (weight × reps) on lifts where the muscle is the main target; small number = pounds on lifts where it assists'
+    : 'Hard sets where the muscle is the main target; small number = sets where it assists';
+  $('#vol-key').replaceChildren(...(lbs
+    ? [['var(--tint)', "Under half of that muscle's best week"], ['var(--cyan-light)', 'Half to 85% of its best'], ['var(--cyan)', 'Within 15% of its best week']]
+    : [['var(--tint)', 'Under 10 direct sets'], ['var(--cyan-light)', '10 to 20 (the usual growth range)'], ['var(--cyan)', 'Over 20']])
+    .map(([c, t]) => el('span', {}, el('i', { style: `background:${c}` }), t)));
+  $('#vol-muscles').replaceChildren(el('table', { class: 'vol' },
+    el('thead', {}, el('tr', {}, el('th', { text: 'Muscle' }), weeks.map(weekHead))),
+    el('tbody', {}, used.map((m) => el('tr', {}, el('td', { text: MUSCLE_NAME[m] }),
+      weeks.map((w) => { const [d, a] = val(w, m);
+        return el('td', { class: 'num ' + band(d, m), title: `${MUSCLE_NAME[m]}, week of ${fmtDate(w)}: ${fmt(d)} direct, ${fmt(a)} assisting${lbs ? ' (lbs)' : ''}` },
+          d ? fmt(d) : (a ? '' : '—'), a ? el('small', { text: `+${fmt(a)}` }) : null); }))))));
+
+  // By lift, one page per day. Only sets logged on that day's tab count, so a lift
+  // done on two days (Inc DB Bench Mon and Thu) gets a separate row on each page.
+  $('#vol-workout-sub').textContent = lbs ? 'Pounds moved (weight × reps), with sets underneath' : 'Sets logged, with pounds moved (weight × reps) underneath';
+  const pair = (sets, pounds) => lbs ? [fmtLbs(pounds), `${sets} sets`] : [String(sets), fmtLbs(pounds)];
+  if (!DATA.days.includes(volDay)) volDay = DATA.days[0];
+  $('#vol-days').replaceChildren(...DATA.days.map((d) => el('button', { type: 'button', 'aria-pressed': d === volDay,
+    text: dayName(d), title: d, onclick: () => { volDay = d; try { localStorage.setItem('lift-vol-day', d); } catch {} renderVolume(); } })));
+  const logged = V.by_day[volDay] || {};
+  const dayWeeks = weeks.filter((w) => Object.values(logged).some((x) => x.weeks[w]));
+  const routine = DATA.lifts.filter((l) => l.current && l.day === volDay).sort((x, y) => x.order - y.order);
+  const gone = Object.keys(logged).filter((k) => !routine.some((l) => l.key === k));
+  const row = (name, scheme, k) => el('tr', {},
+    el('td', {}, name, scheme ? el('small', { style: 'font-weight:400;color:var(--muted)', text: scheme }) : null),
+    dayWeeks.map((w) => { const x = logged[k]?.weeks[w];
+      if (!x) return el('td', { class: 'num', text: '—' });
+      const [big, small] = pair(...x);
+      return el('td', { class: 'num' }, big, el('small', { text: small })); }));
+  $('#vol-workouts').replaceChildren(!dayWeeks.length ? el('p', { class: 'muted', text: `Nothing logged on ${volDay} yet.` }) : el('table', { class: 'vol' },
+    el('thead', {}, el('tr', {}, el('th', { text: 'Lift' }), dayWeeks.map(weekHead))),
+    el('tbody', {},
+      routine.map((l) => row(l.name, l.scheme, l.key)),
+      gone.length ? el('tr', { class: 'group' }, el('td', { text: "Not in this day's routine" }), dayWeeks.map(() => el('td'))) : null,
+      gone.map((k) => row(logged[k].title, '', k)),
+      el('tr', { class: 'total' }, el('td', { text: 'Day total' }),
+        dayWeeks.map((w) => { const t = Object.values(logged).reduce((acc, x) => { const v = x.weeks[w]; return v ? [acc[0] + v[0], acc[1] + v[1]] : acc; }, [0, 0]);
+          const [big, small] = pair(...t); return el('td', { class: 'num' }, big, el('small', { text: small })); })))));
+}
+document.querySelectorAll('.seg:not(.days) button').forEach((b) => b.addEventListener('click', () => {
+  volMode = b.dataset.mode;
+  try { localStorage.setItem('lift-vol-mode', volMode); } catch {}
+  renderVolume(); renderDeath(); renderTime();
+}));
+
+// ---- Death sets (tracker tab) ---------------------------------------------------
+const chain = (drops) => drops.map(([w, r]) => `${fmtW(w)}×${r}`).join(' → ');
+const pct = (now, before) => before ? Math.round(100 * (now - before) / before) : null;
+const weekOf = (date) => { const d = new Date(date + 'T12:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+const fmtMin = (m) => `${Math.round(m)} min`;
+// Last logged time on the same day before this one; old-split workouts aren't a baseline.
+function prevTime(t) {
+  const ok = new Set(workouts().filter((w) => w.day === t.day).map((w) => w.date));
+  return DATA.times.filter((x) => x.day === t.day && x.date < t.date && ok.has(x.date)).at(-1);
+}
+const pace = (t, lbs) => lbs ? `${Math.round(t.lbs / t.minutes)} lbs/min` : `${(t.minutes / t.sets).toFixed(1)} min/set`;
+function renderTime() {
+  const T = DATA.times, lbs = volMode === 'lbs';
+  if (!T.length) { $('#time-sub').textContent = ''; $('#vol-time').replaceChildren(el('p', { class: 'muted', text: 'No times logged yet. Fill in the Time column on a day tab.' })); return; }
+  const weeks = [...new Set(T.map((t) => weekOf(t.date)))].sort().reverse();
+  const days = DATA.days.filter((d) => T.some((t) => t.day === d));
+  const at = (d, w) => T.filter((t) => t.day === d && weekOf(t.date) === w);
+  $('#time-sub').textContent = `From the Time column on each day tab. Small number is pace (${lbs ? 'pounds moved per minute' : 'minutes per set'}); % is vs the last time on that day.`;
+  $('#vol-time').replaceChildren(el('table', { class: 'vol' },
+    el('thead', {}, el('tr', {}, el('th', { text: 'Day' }), weeks.map(weekHead))),
+    el('tbody', {},
+      days.map((d) => el('tr', {}, el('td', { text: dayName(d) }),
+        weeks.map((w) => { const xs = at(d, w);
+          if (!xs.length) return el('td', { class: 'num', text: '—' });
+          const t = xs.at(-1), before = prevTime(t), ch = before ? pct(t.minutes, before.minutes) : null;
+          return el('td', { class: 'num', title: `${t.date}: ${t.minutes} min, ${t.sets} sets, ${fmtLbs(t.lbs)}` }, fmtMin(xs.reduce((a, x) => a + x.minutes, 0)),
+            el('small', { text: pace(t, lbs) }),
+            ch == null ? null : el('span', { class: 'dpct', style: 'color:var(--muted)', text: `${ch > 0 ? '+' : ''}${ch}%` })); }))),
+      el('tr', { class: 'total' }, el('td', { text: 'Week total' }),
+        weeks.map((w) => { const xs = T.filter((t) => weekOf(t.date) === w), m = xs.reduce((a, x) => a + x.minutes, 0);
+          const h = Math.floor(m / 60);
+          return el('td', { class: 'num' }, `${h}h ${String(Math.round(m - h * 60)).padStart(2, '0')}m`,
+            el('small', { text: pace({ minutes: m, sets: xs.reduce((a, x) => a + x.sets, 0), lbs: xs.reduce((a, x) => a + x.lbs, 0) }, lbs) })); })))));
+}
+const prevWeek = (w) => { const d = new Date(w + 'T12:00'); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10); };
+function renderDeath() {
+  const D = DATA.death, weeks = Object.keys(D.weeks).sort().reverse();
+  const lbs = volMode === 'lbs';
+  if (!D.columns.length || !weeks.length) { $('#vol-death').replaceChildren(el('p', { class: 'muted', text: 'Nothing in the tracker yet.' })); return; }
+  $('#death-sub').textContent = `From your "Attempt at death set tracker" tab. ${lbs ? 'Pounds' : 'Reps'} across the drops after your last full set; % is vs the week before.`;
+  $('#vol-death').replaceChildren(el('table', { class: 'vol' },
+    el('thead', {}, el('tr', {}, el('th', { text: 'Death set' }), weeks.map(weekHead))),
+    el('tbody', {}, D.columns.map((c) => el('tr', {},
+      el('td', {}, c.name, el('small', { style: 'font-weight:400;color:var(--muted)', text: dayName(c.day) })),
+      weeks.map((w) => { const x = D.weeks[w][c.id];
+        if (!x) return el('td', { class: 'num', text: '—' });
+        const before = D.weeks[prevWeek(w)]?.[c.id], ch = before ? pct(lbs ? x.lbs : x.reps, lbs ? before.lbs : before.reps) : null;
+        return el('td', { class: 'num', title: chain(x.drops) }, lbs ? fmtLbs(x.lbs) : `${x.reps} reps`, el('small', { text: chain(x.drops) }),
+          ch == null ? null : el('span', { class: 'dpct ' + (ch > 0 ? 'up' : ch < 0 ? 'down' : ''), text: `${ch > 0 ? '+' : ''}${ch}%` })); }))))));
+}
+
+// ---- Daily summary PNG ------------------------------------------------------------
+// One workout (a date on one day) drawn on a canvas in the report colours.
+function workouts() {
+  const seen = new Map();
+  for (const l of DATA.lifts) if (l.current)
+    for (const s of l.sessions) if (s.day === l.day && !s.moved) seen.set(`${s.date}|${l.day}`, { date: s.date, day: l.day });
+  return [...seen.values()].sort((a, b) => b.date.localeCompare(a.date) || DATA.days.indexOf(a.day) - DATA.days.indexOf(b.day));
+}
+function summaryFor(date, day) {
+  const lbsOf = (l, s) => s.sets.reduce((a, [w, r]) => a + (w + (l.base || 0)) * r, 0);
+  const rows = [];
+  for (const l of DATA.lifts.filter((x) => x.current && x.day === day).sort((a, b) => a.order - b.order)) {
+    const mine = l.sessions.filter((s) => s.day === day);
+    const s = mine.find((x) => x.date === date);
+    if (!s) continue;
+    const prev = mine.filter((x) => x.date < date && !x.moved).at(-1);   // old-split sessions aren't a baseline
+    const top = Math.max(...s.sets.map(([w]) => w));
+    rows.push({ l, s, sets: s.sets.length, lbs: lbsOf(l, s), prev, prevLbs: prev ? lbsOf(l, prev) : null,
+      top: `${fmtW(top)}×${Math.max(...s.sets.filter(([w]) => w === top).map(([, r]) => r))}` });
+  }
+  const week = (() => { const d = new Date(date + 'T12:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toISOString().slice(0, 10); })();
+  const death = DATA.death.columns.filter((c) => c.day === day).map((c) => ({ c, now: DATA.death.weeks[week]?.[c.id], before: DATA.death.weeks[prevWeek(week)]?.[c.id] })).filter((x) => x.now);
+  const compared = rows.filter((r) => r.prev);
+  const hit = {}, load = {};
+  for (const r of rows) {
+    r.l.secondary.forEach((m) => { hit[m] ||= 's'; (load[m] ||= [0, 0])[1] += r.sets; });
+    r.l.primary.forEach((m) => { hit[m] = 'p'; (load[m] ||= [0, 0])[0] += r.sets; });
+  }
+  const time = DATA.times.find((t) => t.date === date && t.day === day);
+  return { date, day, rows, death, hit, load, time, timeBefore: time ? prevTime(time) : null,
+    sets: rows.reduce((a, r) => a + r.sets, 0), lbs: rows.reduce((a, r) => a + r.lbs, 0),
+    cmpNow: compared.reduce((a, r) => a + r.lbs, 0), cmpBefore: compared.reduce((a, r) => a + r.prevLbs, 0),
+    cmpSetsNow: compared.reduce((a, r) => a + r.sets, 0), cmpSetsBefore: compared.reduce((a, r) => a + r.prev.sets.length, 0) };
+}
+
+const C = { bg: '#212326', panel: '#2A2C30', line: '#3A3D42', ink: '#FFFFFF', muted: '#A3A8AE', cyan: '#3AB7D6',
+  cyanLight: '#8FD3E6', red: '#E06C6C', off: '#44474D', body: '#303236' };
+const FONT = '"EB Garamond", Garamond, serif';
+function drawBody(ctx, x0, y0, scale, hit) {
+  const fig = (dx, parts, label) => {
+    for (const mirror of [false, true]) {
+      ctx.save();
+      ctx.translate(x0 + dx * scale, y0); ctx.scale(scale, scale);
+      if (mirror) { ctx.translate(200, 0); ctx.scale(-1, 1); }
+      ctx.lineWidth = 1.2;
+      for (const d of BASE) { const p = new Path2D(d); ctx.fillStyle = C.body; ctx.fill(p); ctx.strokeStyle = C.line; ctx.stroke(p); }
+      for (const [m, d] of parts) { const p = new Path2D(d);
+        ctx.fillStyle = hit[m] === 'p' ? C.cyan : hit[m] === 's' ? C.cyanLight : C.off; ctx.fill(p); ctx.strokeStyle = C.bg; ctx.stroke(p); }
+      ctx.restore();
+    }
+    ctx.save(); ctx.translate(x0 + dx * scale, y0); ctx.scale(scale, scale);
+    ctx.fillStyle = C.body; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.ellipse(100, 30, 16, 20, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillRect(92, 46, 16, 14);
+    ctx.restore();
+    ctx.fillStyle = C.muted; ctx.font = `22px ${FONT}`; ctx.textAlign = 'center';
+    ctx.fillText(label, x0 + (dx + 100) * scale, y0 + 440 * scale); ctx.textAlign = 'left';
+  };
+  fig(0, FRONT, 'Front'); fig(210, BACK, 'Back');
+}
+// No baseline yet (first time on the new split) counts as no change.
+function deltaText(ch) { ch ??= 0; return [`${ch > 0 ? '+' : ''}${ch}%`, ch > 0 ? C.cyan : ch < 0 ? C.red : C.muted]; }
+
+async function drawSummary() {
+  const pick = $('#sum-pick'), list = workouts();
+  if (!pick.options.length) pick.replaceChildren(...list.map((w) => el('option', { value: `${w.date}|${w.day}`,
+    text: `${new Date(w.date + 'T12:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${dayName(w.day)}` })));
+  if (!pick.value) return;
+  const [date, day] = pick.value.split('|');
+  const S = summaryFor(date, day);
+  try { await Promise.all([document.fonts.load(`700 40px "EB Garamond"`), document.fonts.load(`400 40px "EB Garamond"`)]); } catch {}
+
+  const W = 1080, P = 64, rowH = 66;
+  const deathH = S.death.length ? 70 + S.death.length * 84 : 0;
+  const H = 960 + 70 + S.rows.length * rowH + deathH + 90;
+  const cv = $('#sum-canvas'); cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  const text = (t, x, y, size, color = C.ink, weight = 400, align = 'left') => {
+    ctx.font = `${weight} ${size}px ${FONT}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.fillText(t, x, y); ctx.textAlign = 'left'; };
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = C.cyan; ctx.fillRect(P, 56, W - 2 * P, 4);
+
+  const when = new Date(date + 'T12:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  text(when.toUpperCase(), P, 112, 26, C.cyan, 700);
+  text(dayName(day).replace(' - ', ' · '), P, 182, 66, C.ink, 700);
+
+  // Stat tiles
+  const tiles = [
+    ['Volume', fmtLbs(Math.round(S.lbs)), pct(S.cmpNow, S.cmpBefore)],
+    ['Sets', String(S.sets), pct(S.cmpSetsNow, S.cmpSetsBefore)],
+    ['Time', S.time ? fmtMin(S.time.minutes) : '—', S.timeBefore ? pct(S.time.minutes, S.timeBefore.minutes) : null],
+    ['Death sets', String(S.rows.filter((r) => r.s.death).length), null],
+  ];
+  const tw = (W - 2 * P - 3 * 20) / 4;
+  tiles.forEach(([label, val, ch], i) => {
+    const x = P + i * (tw + 20), y = 222;
+    ctx.fillStyle = C.panel; ctx.fillRect(x, y, tw, 150);
+    ctx.fillStyle = C.cyan; ctx.fillRect(x, y, 5, 150);
+    text(label, x + 26, y + 42, 26, C.muted);
+    let vs = 56; ctx.font = `700 ${vs}px ${FONT}`;
+    while (vs > 34 && ctx.measureText(val).width > tw - 44) ctx.font = `700 ${--vs}px ${FONT}`;
+    text(val, x + 26, y + 104, vs, C.ink, 700);
+    if (i < 2) { const [t, c] = deltaText(ch); text(`${t} vs last week`, x + 26, y + 136, 20, c, 700); }
+    else if (i === 2) {
+      if (!S.time) text('not logged', x + 26, y + 136, 20, C.muted);
+      else { const [t] = deltaText(ch); text(`${t} · ${(S.time.minutes / S.time.sets).toFixed(1)} min/set`, x + 26, y + 136, 20, C.muted, 700); }
+    }
+    else text(S.death.length ? 'drops tracked' : 'to failure', x + 26, y + 136, 20, C.muted);
+  });
+
+  // Body map + muscles hit
+  drawBody(ctx, P - 6, 412, 1.0, S.hit);
+  const mx = 500, my = 430;
+  text('MUSCLES HIT', mx, my, 24, C.cyan, 700);
+  const ms = Object.entries(S.load).map(([m, [d, a]]) => ({ m, d, a })).sort((x, y) => (y.d + y.a / 2) - (x.d + x.a / 2)).slice(0, 9);
+  const top = Math.max(...ms.map((x) => x.d + x.a), 1), bw = W - P - mx - 90;
+  ms.forEach((x, i) => {
+    const y = my + 42 + i * 50;
+    text(MUSCLE_NAME[x.m].replace(' (rhomboids, mid traps)', ''), mx, y, 26, C.ink, x.d ? 700 : 400);
+    ctx.fillStyle = C.line; ctx.fillRect(mx, y + 12, bw, 10);
+    ctx.fillStyle = C.cyan; ctx.fillRect(mx, y + 12, bw * x.d / top, 10);
+    ctx.fillStyle = C.cyanLight; ctx.fillRect(mx + bw * x.d / top, y + 12, bw * x.a / top, 10);
+    text(x.d ? `${x.d}${x.a ? ` +${x.a}` : ''}` : `+${x.a}`, W - P, y + 22, 24, C.muted, 400, 'right');
+  });
+  const ky = 912;
+  [[C.cyan, 'Primary'], [C.cyanLight, 'Secondary'], [C.off, 'Not trained']].forEach(([c, t], i) => {
+    ctx.fillStyle = c; ctx.fillRect(P + i * 170, ky - 16, 18, 18); text(t, P + i * 170 + 28, ky, 22, C.muted); });
+  text('sets: main target +assisting', W - P, ky, 22, C.muted, 400, 'right');
+
+  // Lift table
+  let y = 960;
+  ctx.fillStyle = C.panel; ctx.fillRect(P, y, W - 2 * P, 48);
+  const cols = { lift: P + 18, top: 600, sets: 720, vol: 870, ch: W - P - 18 };
+  text('Lift', cols.lift, y + 33, 24, C.ink, 700); text('Top set', cols.top, y + 33, 24, C.ink, 700, 'right');
+  text('Sets', cols.sets, y + 33, 24, C.ink, 700, 'right'); text('Volume', cols.vol, y + 33, 24, C.ink, 700, 'right');
+  text('vs last wk', cols.ch, y + 33, 24, C.ink, 700, 'right');
+  y += 48;
+  S.rows.forEach((r, i) => {
+    if (i % 2) { ctx.fillStyle = '#26282C'; ctx.fillRect(P, y, W - 2 * P, rowH); }
+    // shrink long names to fit before the Top set column
+    const room = cols.top - 110 - cols.lift - (r.s.death ? 76 : 0);
+    let size = 28; ctx.font = `600 ${size}px ${FONT}`;
+    while (size > 20 && ctx.measureText(r.l.name).width > room) ctx.font = `600 ${--size}px ${FONT}`;
+    text(r.l.name, cols.lift, y + 42, size, C.ink, 600);
+    if (r.s.death) text('DEATH', cols.lift + ctx.measureText(r.l.name).width + 12, y + 40, 18, C.cyan, 700);
+    text(r.top, cols.top, y + 42, 26, C.muted, 400, 'right');
+    text(String(r.sets), cols.sets, y + 42, 26, C.ink, 400, 'right');
+    text(fmtLbs(Math.round(r.lbs)), cols.vol, y + 42, 26, C.ink, 400, 'right');
+    const [t, c] = deltaText(r.prev ? pct(r.lbs, r.prevLbs) : null);
+    text(t, cols.ch, y + 42, 26, c, 700, 'right');
+    y += rowH;
+  });
+  ctx.fillStyle = C.line; ctx.fillRect(P, y, W - 2 * P, 2);
+
+  // Death sets from the tracker
+  if (S.death.length) {
+    y += 56; text('DEATH SET DROPS', P, y, 24, C.cyan, 700); y += 14;
+    for (const d of S.death) {
+      y += 46;
+      text(d.c.name, P, y, 28, C.ink, 600);
+      text(chain(d.now.drops), P, y + 34, 24, C.muted);
+      const ch = d.before ? pct(d.now.lbs, d.before.lbs) : null, [t, c] = deltaText(ch);
+      text(fmtLbs(d.now.lbs), W - P, y, 28, C.ink, 700, 'right');
+      text(`${t} vs last week`, W - P, y + 34, 22, c, 700, 'right');
+      y += 38;
+    }
+  }
+  text('Lift Board', P, H - 40, 24, C.muted, 700);
+  text(S.rows.some((r) => r.prev) ? '% compares each lift with your last time doing it on this day' : 'Week 1 of the new split: changes start next week',
+    W - P, H - 40, 20, C.muted, 400, 'right');
+  $('#sum-msg').textContent = '';
+}
+$('#sum-pick')?.addEventListener('change', drawSummary);
+$('#sum-save')?.addEventListener('click', () => {
+  const [date, day] = $('#sum-pick').value.split('|');
+  $('#sum-canvas').toBlob((b) => {
+    const a = el('a', { href: URL.createObjectURL(b), download: `Lift summary ${date} ${dayName(day)}.png` });
+    document.body.append(a); a.click(); a.remove();
+    $('#sum-msg').textContent = 'Saved to your Downloads folder.';
+  }, 'image/png');
+});
+
+function showView(name) {
+  document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', b.dataset.view === name));
+  $('#view-board').hidden = name !== 'board';
+  $('#view-volume').hidden = name !== 'volume';
+  $('#view-summary').hidden = name !== 'summary';
+  if (name === 'summary') drawSummary();
+  try { history.replaceState(null, '', name === 'board' ? location.pathname : '#' + name); } catch {}
+}
+document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+// Refresh button: the local server (server.py) pulls the sheet and rebuilds this page.
+$('#refresh-btn').addEventListener('click', async () => {
+  const btn = $('#refresh-btn'), msg = $('#refresh-msg');
+  msg.className = '';
+  if (location.protocol === 'file:') {
+    msg.className = 'err';
+    msg.replaceChildren('Refresh works on the served page: ', el('a', { href: 'http://localhost:8765/', text: 'localhost:8765' }));
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Pulling your sheet…'; msg.textContent = '';
+  try {
+    const r = await fetch('/refresh', { method: 'POST' });
+    const body = await r.json();
+    if (!body.ok) throw new Error(body.message);
+    try { sessionStorage.setItem('lift-refresh', 'Refreshed from your sheet just now.'); } catch {}
+    location.reload();
+  } catch (e) {
+    msg.className = 'err';
+    msg.textContent = e.message === 'Failed to fetch' ? "Can't reach the local server. Is it running?" : e.message;
+    btn.disabled = false; btn.textContent = 'Refresh from sheet';
+  }
+});
+try { const m = sessionStorage.getItem('lift-refresh'); if (m) { $('#refresh-msg').textContent = m; sessionStorage.removeItem('lift-refresh'); } } catch {}
+render();
+renderVolume();
+renderDeath();
+renderTime();
+showView(['#volume', '#summary'].includes(location.hash) ? location.hash.slice(1) : 'board');
+</script>
+</body>
+</html>
